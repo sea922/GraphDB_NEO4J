@@ -1,0 +1,170 @@
+//full spreadsheet with synthetic data
+//https://docs.google.com/spreadsheets/d/1R-XVuynPsOWcXSderLpq3DacZdk10PZ8v6FiYGTncIE/edit#gid=0
+
+// person sheet˝
+// https://docs.google.com/spreadsheets/u/0/d/1R-XVuynPsOWcXSderLpq3DacZdk10PZ8v6FiYGTncIE/export?format=csv&id=1R-XVuynPsOWcXSderLpq3DacZdk10PZ8v6FiYGTncIE&gid=0
+// Person: PersonId	PersonName	Healthstatus	ConfirmedTime
+
+// place sheet
+// https://docs.google.com/spreadsheets/u/0/d/1R-XVuynPsOWcXSderLpq3DacZdk10PZ8v6FiYGTncIE/export?format=csv&id=1R-XVuynPsOWcXSderLpq3DacZdk10PZ8v6FiYGTncIE&gid=205425553
+// Place: PlaceId	PlaceName	PlaceType   Lat Long
+
+
+// visits sheet
+// https://docs.google.com/spreadsheets/d/1R-XVuynPsOWcXSderLpq3DacZdk10PZ8v6FiYGTncIE/export?format=csv&id=1R-XVuynPsOWcXSderLpq3DacZdk10PZ8v6FiYGTncIE&gid=1261126668
+// VisitId	PersonId	PlaceId	StartTime	EndTime
+
+
+//import the persons
+load csv with headers from
+"https://docs.google.com/spreadsheets/u/0/d/1R-XVuynPsOWcXSderLpq3DacZdk10PZ8v6FiYGTncIE/export?format=csv&id=1R-XVuynPsOWcXSderLpq3DacZdk10PZ8v6FiYGTncIE&gid=0" as csv
+create (p:Person {id: csv.PersonId, name:csv.PersonName, healthstatus:csv.Healthstatus, confirmedtime:datetime(csv.ConfirmedTime), addresslocation:point({x: toFloat(csv.AddressLat), y: toFloat(csv.AddressLong)})});
+
+
+//import the places
+load csv with headers from
+"https://docs.google.com/spreadsheets/u/0/d/1R-XVuynPsOWcXSderLpq3DacZdk10PZ8v6FiYGTncIE/export?format=csv&id=1R-XVuynPsOWcXSderLpq3DacZdk10PZ8v6FiYGTncIE&gid=205425553" as csv
+create (p:Place {id: csv.PlaceId, name:csv.PlaceName, type:csv.PlaceType, homelocation:point({x: toFloat(csv.Lat), y: toFloat(csv.Long)})});
+
+create index on :Place(id);
+create index on :Place(location);
+create index on :Place(name);
+create index on :Person(id);
+create index on :Person(name);
+create index on :Person(healthstatus);
+create index on :Person(confirmedtime);
+
+//import the VISITS
+//loading duplicate info here: both with a VISIT node, and a VISITS relationship
+load csv with headers from
+"https://docs.google.com/spreadsheets/d/1R-XVuynPsOWcXSderLpq3DacZdk10PZ8v6FiYGTncIE/export?format=csv&id=1R-XVuynPsOWcXSderLpq3DacZdk10PZ8v6FiYGTncIE&gid=1261126668" as csv
+match (p:Person {id:csv.PersonId}), (pl:Place {id:csv.PlaceId})
+create (p)-[:PERFORMS_VISIT]->(v:Visit {id:csv.VisitId, starttime:datetime(csv.StartTime), endtime:datetime(csv.EndTime)})-[:LOCATED_AT]->(pl)
+create (p)-[vi:VISITS {id:csv.VisitId, starttime:datetime(csv.StartTime), endtime:datetime(csv.EndTime)}]->(pl)
+set v.duration=duration.inSeconds(v.starttime,v.endtime)
+set vi.duration=duration.inSeconds(vi.starttime,vi.endtime);
+
+//connect places to Region
+create (r:Region {name:"Antwerp"})-[:PART_OF]->(c:Country {name:"Belgium"})-[:PART_OF]->(co:Continent {name:"Europe"});
+match (r:Region {name:"Antwerp"}), (pl:Place)
+create (pl)-[:PART_OF]->(r);
+
+
+
+
+
+
+//contract tracing queries
+
+//who has a sick person potentially infected
+match (p:Person {healthstatus:"Sick"})
+with p
+limit 1
+match (p)--(v1:Visit)--(pl:Place)--(v2:Visit)--(p2:Person {healthstatus:"Healthy"})
+return p.name as Spreader, v1.starttime as SpreaderStarttime, v2.endtime as SpreaderEndtime, pl.name as PlaceVisited, p2.name as Target, v2.starttime as TargetStarttime, v2.endtime as TargetEndttime;
+
+//who has a sick person potentially infected - VISUAL
+match (p:Person {healthstatus:"Sick"})
+with p
+limit 1
+match path = (p)-->(v1:Visit)-->(pl:Place)<--(v2:Visit)<--(p2:Person {healthstatus:"Healthy"})
+return path;
+
+//simplifying the query by using the VISITS relationship
+match (p:Person {healthstatus:"Sick"})
+with p
+limit 1
+match path = (p)-[:VISITS]->(pl:Place)<-[:VISITS]-(p2:Person {healthstatus:"Healthy"})
+return path
+
+//who has a sick person infected - with time overlap
+//The latest of start times must occur before (or at the same time) as the earliest of the end times for the ranges to overlap.
+match (p:Person {healthstatus:"Sick"})-->(v1:Visit)-->(pl:Place)
+with p,v1,pl
+limit 10
+match path = (p)-->(v1)-->(pl)<--(v2:Visit)<--(p2:Person {healthstatus:"Healthy"})
+WITH path, apoc.coll.max([v1.starttime.epochMillis, v2.starttime.epochMillis]) as maxStart,
+     apoc.coll.min([v1.endtime.epochMillis, v2.endtime.epochMillis]) as minEnd
+where maxStart <= minEnd
+return path;
+
+//who has a sick person infected - with time overlap AND SIMPLIFIED
+//The latest of start times must occur before (or at the same time) as the earliest of the end times for the ranges to overlap.
+match (p:Person {healthstatus:"Sick"})-[v1:VISITS]->(pl:Place)
+with p,v1,pl
+limit 10
+match path = (p)-[v1]->(pl)<-[v2:VISITS]-(p2:Person {healthstatus:"Healthy"})
+WITH path, apoc.coll.max([v1.starttime.epochMillis, v2.starttime.epochMillis]) as maxStart,
+     apoc.coll.min([v1.endtime.epochMillis, v2.endtime.epochMillis]) as minEnd
+where maxStart <= minEnd
+return path
+
+//who has a sick person infected - with time overlap +/- 2hrs
+//The latest of start times must occur before (or at the same time) as the earliest of the end times for the ranges to overlap.
+match (p:Person {healthstatus:"Sick"})-->(s1:Stay)-->(pl:Place)
+with p,s1,pl
+limit 10
+match path = (p)-->(s1)-->(pl)<--(s2:Stay)<--(p2:Person {healthstatus:"Healthy"})
+WITH path, apoc.coll.max([s1.starttime.epochMillis, s2.starttime.epochMillis]) as maxStart,
+     apoc.coll.min([s1.endtime.epochMillis, s2.endtime.epochMillis]) as minEnd
+where maxStart-720000 <= minEnd+720000
+return path
+
+//find sick person that has visited places since being infected
+match (p:Person {healthstatus:"Sick"})-[visited]->(pl:Place)
+where p.confirmedtime < visited.starttime
+return p, visited, pl
+limit 10;
+
+//find sick person that has visited a place more than once, and 
+match (pl:Place)<-[v2]-(p:Person {healthstatus:"Sick"})-[v1]->(pl:Place)
+where p.confirmedtime > v1.starttime
+or p.confirmedtime > v2.starttime
+return *
+
+//find connections between sick people
+match (p1:Person {healthstatus:"Sick"}),(p2:Person {healthstatus:"Sick"})
+where id(p1)<id(p2)
+with p1, p2
+match path = allshortestpaths ((p1)-[*]-(p2))
+return path
+limit 10; 
+
+
+//how many sick and healthy people
+match (p:Person)
+return distinct p.healthstatus, count(*)
+
+//which healthy person has the highest risk - based on amount over overlaptime with sick people
+match (hp:Person {healthstatus:"Healthy"})-[v1:VISITS]->(pl:Place)<-[v2:VISITS]-(sp:Person {healthstatus:"Sick"})
+with hp, apoc.coll.max([v1.starttime.epochMillis, v2.starttime.epochMillis]) as maxStart,
+     apoc.coll.min([v1.endtime.epochMillis, v2.endtime.epochMillis]) as minEnd
+where maxStart <= minEnd
+return hp.name, hp.healthstatus, sum(minEnd-maxStart) as overlaptime
+order by overlaptime desc;
+
+//which healthy person has the highest risk - based on amount over overlaptime with sick people - VISUAL
+match (hp:Person {healthstatus:"Healthy"})-[v1:VISITS]->(pl:Place)<-[v2:VISITS]-(sp:Person {healthstatus:"Sick"})
+with hp, apoc.coll.max([v1.starttime.epochMillis, v2.starttime.epochMillis]) as maxStart,
+     apoc.coll.min([v1.endtime.epochMillis, v2.endtime.epochMillis]) as minEnd
+where maxStart <= minEnd
+with hp, sum(minEnd-maxStart) as overlaptime
+order by overlaptime desc
+limit 10
+match (hp)-[v]-(pl:Place)
+return hp,v,pl;
+
+//places with most sick visits
+match (p:Person {healthstatus:"Sick"})-[v:VISITS]->(pl:Place)
+with distinct pl.name as placename, count(v) as nrofsickvisits, apoc.node.degree.in(pl,'VISITS') as totalnrofvisits
+order by nrofsickvisits desc
+limit 10
+return placename, nrofsickvisits, totalnrofvisits, round(toFloat(nrofsickvisits)/toFloat(totalnrofvisits)*10000)/100 as percentageofsickvisits
+
+//places with most sick visits - VISUAL
+match (p:Person {healthstatus:"Sick"})-[v:VISITS]->(pl:Place)
+with distinct pl.name as placename, count(v) as nrofsickvisits, pl
+order by nrofsickvisits desc
+limit 10
+match (pl)<-[v]-(p:Person)
+return pl,p,v
