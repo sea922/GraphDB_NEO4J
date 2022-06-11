@@ -1,0 +1,89 @@
+//1> Who has a sick person potentially infected
+match (p:Person {healthstatus:"Sick"})
+with p
+limit 1
+match (p)--(v1:Visit)--(pl:Place)--(v2:Visit)--(p2:Person {healthstatus:"Healthy"})
+return p.name as Spreader, v1.starttime as SpreaderStarttime, v2.endtime as SpreaderEndtime, pl.name as PlaceVisited, p2.name as Target, v2.starttime as TargetStarttime, v2.endtime as TargetEndttime;
+
+//2> Who has a sick person potentially infected - VISUAL
+match (p:Person {healthstatus:"Sick"})
+with p
+limit 1
+match path = (p)-->(v1:Visit)-->(pl:Place)<--(v2:Visit)<--(p2:Person {healthstatus:"Healthy"})
+return path;
+
+//3.1> The latest of start times must occur before (or at the same time) as the earliest of the end times for the ranges to overlap.
+match (p:Person {healthstatus:"Sick"})-->(v1:Visit)-->(pl:Place)
+with p,v1,pl
+limit 10
+match path = (p)-->(v1)-->(pl)<--(v2:Visit)<--(p2:Person {healthstatus:"Healthy"})
+WITH path, apoc.coll.max([v1.starttime.epochMillis, v2.starttime.epochMillis]) as maxStart,
+     apoc.coll.min([v1.endtime.epochMillis, v2.endtime.epochMillis]) as minEnd
+where maxStart <= minEnd
+return path;
+
+//3> Simplifying the query by using the VISITS relationship
+match (p:Person {healthstatus:"Sick"})
+with p
+limit 1
+match path = (p)-[:VISITS]->(pl:Place)<-[:VISITS]-(p2:Person {healthstatus:"Healthy"})
+return path;
+
+//Find connections between sick people
+match (p1:Person {healthstatus:"Sick"}),(p2:Person {healthstatus:"Sick"})
+where id(p1)<id(p2)
+with p1, p2
+match path = allshortestpaths ((p1)-[*]-(p2))
+return path
+limit 10;
+
+//Find sick person that has visited places since being infected  
+match (p:Person {healthstatus:"Sick"})-[visited]->(pl:Place)
+where p.confirmedtime < visited.starttime
+return p, visited, pl
+limit 10;
+
+//How many sick and healthy people
+match (p:Person)
+return distinct p.healthstatus, count(*);
+
+match (hp:Person {healthstatus:"Healthy"})-[v1:VISITS]->(pl:Place)<-[v2:VISITS]-(sp:Person {healthstatus:"Sick"})
+with hp, apoc.coll.max([v1.starttime.epochMillis, v2.starttime.epochMillis]) as maxStart,
+     apoc.coll.min([v1.endtime.epochMillis, v2.endtime.epochMillis]) as minEnd
+where maxStart <= minEnd
+with hp, sum(minEnd-maxStart) as overlaptime
+order by overlaptime desc
+limit 10
+match (hp)-[v]-(pl:Place)
+return hp,v,pl;
+
+//Places with most sick visits
+match (p:Person {healthstatus:"Sick"})-[v:VISITS]->(pl:Place)
+with distinct pl.name as placename, count(v) as nrofsickvisits, apoc.node.degree.in(pl,'VISITS') as totalnrofvisits
+order by nrofsickvisits desc
+limit 10
+return placename, nrofsickvisits, totalnrofvisits, round(toFloat(nrofsickvisits)/toFloat(totalnrofvisits)*10000)/100 as percentageofsickvisits;
+
+//Places with most sick visits-VISUAL
+match (p:Person {healthstatus:"Sick"})-[v:VISITS]->(pl:Place)
+with distinct pl.name as placename, count(v) as nrofsickvisits, pl
+order by nrofsickvisits desc
+limit 10
+match (pl)<-[v]-(p:Person)
+return pl,p,v;
+
+//Places with most sick visits-VISUAL
+match (p:Person {healthstatus:"Sick"})-[v:VISITS]->(pl:Place)
+with distinct pl.name as placename, count(v) as nrofsickvisits, pl
+order by nrofsickvisits desc
+limit 10
+match (pl)<-[v]-(p:Person)
+return pl,p,v;
+
+//Which healthy person has the highest risk - based on amount over overlaptime with sick people
+match (hp:Person {healthstatus:"Healthy"})-[v1:VISITS]->(pl:Place)<-[v2:VISITS]-(sp:Person {healthstatus:"Sick"})
+with hp, apoc.coll.max([v1.starttime.epochMillis, v2.starttime.epochMillis]) as maxStart,
+     apoc.coll.min([v1.endtime.epochMillis, v2.endtime.epochMillis]) as minEnd
+where maxStart <= minEnd
+return hp.name, hp.healthstatus, sum(minEnd-maxStart) as overlaptime
+order by overlaptime desc;
