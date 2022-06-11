@@ -1,0 +1,146 @@
+//This is a relationship between two PERSON nodes
+match (p1:Person)-[v1:VISITS]->(pl:Place)<-[v2:VISITS]-(p2:Person)
+where id(p1)<id(p2)
+with p1, p2, apoc.coll.max([v1.starttime.epochMillis, v2.starttime.epochMillis]) as maxStart,
+     apoc.coll.min([v1.endtime.epochMillis, v2.endtime.epochMillis]) as minEnd
+where maxStart <= minEnd
+with p1, p2, sum(minEnd-maxStart) as meetTime
+create (p1)-[:MEETS {meettime: duration({seconds: meetTime/1000})}]->(p2);
+
+
+//calculating pagerank of Persons
+:param limit => (10);
+:param config => ({
+  nodeProjection: 'Person',
+  relationshipProjection: {
+    relType: {
+      type: 'MEETS',
+      orientation: 'NATURAL',
+      properties: {}
+    }
+  },
+  relationshipWeightProperty: null,
+  dampingFactor: 0.85,
+  maxIterations: 20,
+  writeProperty: 'pagerank'
+});
+
+CALL gds.pageRank.write($config);
+
+//Person pagerank table results
+MATCH (node)
+WHERE not(node[$config.writeProperty] is null)
+RETURN node.name as name, node[$config.writeProperty] AS pagerank, node.betweenness as betweenness
+ORDER BY pagerank DESC
+LIMIT 10
+
+//Person pagerank graph VISUAL results
+MATCH (node)
+WHERE not(node[$config.writeProperty] is null)
+with node, node[$config.writeProperty] AS score
+ORDER BY score DESC
+LIMIT 10
+match (node)-[r]-(conn)
+return node, r, conn
+
+
+//BETWEENNESS of Person nodes
+:param limit => (20);
+:param config => ({
+  nodeProjection: 'Person',
+  relationshipProjection: {
+    relType: {
+      type: 'MEETS',
+      orientation: 'NATURAL',
+      properties: {}
+    }
+  },
+  writeProperty: 'betweenness'
+});
+
+CALL gds.alpha.betweenness.write($config);
+
+//Person betweenness results table
+MATCH (node)
+WHERE not(node[$config.writeProperty] is null)
+RETURN node.name as name, node.pagerank as pagerank, node[$config.writeProperty] AS betweenness
+ORDER BY betweenness DESC
+LIMIT 10;
+//Person betweenness results VISUAL
+MATCH (node)
+WHERE not(node[$config.writeProperty] is null)
+with node, node[$config.writeProperty] AS score
+ORDER BY score DESC
+LIMIT 10
+match (node)-[r]-(conn)
+return node, r, conn;
+
+
+//LOUVAIN Community detection
+
+//preparation for relationship weight property: needs integer, is currently set up as a duration!
+MATCH p=()-[r:MEETS]->() 
+set r.meettimeinseconds=r.meettime.seconds;
+//Calculate communities using Louvain
+:param limit => ( 50);
+:param config => ({
+  nodeProjection: 'Person',
+  relationshipProjection: {
+    relType: {
+      type: 'MEETS',
+      orientation: 'NATURAL',
+      properties: {
+        meettimeinseconds: {
+          property: 'meettimeinseconds',
+          defaultValue: 1
+        }
+      }
+    }
+  },
+  relationshipWeightProperty: 'meettimeinseconds',
+  includeIntermediateCommunities: false,
+  seedProperty: '',
+  writeProperty: 'louvain'
+});
+
+CALL gds.louvain.write($config);
+
+// MATCH (node)
+// WHERE not(node[$config.writeProperty] is null)
+// WITH node, node[$config.writeProperty] AS community
+// RETURN node, 
+//      CASE WHEN apoc.meta.type(community) = "long[]" THEN community[-1] ELSE community END AS community, 
+//        CASE WHEN apoc.meta.type(community) = "long[]" THEN community ELSE null END as communities
+// LIMIT $limit
+
+//what are the different communities
+match (p:Person)
+return distinct p.louvain, count(p)
+order by count(p) desc;
+
+//explore community 457
+match (p1:Person {louvain: 457})-[v:VISITS]->(pl:Place), (p1)-[m:MEETS]->(p2:Person)
+return p1, p2, pl, v, m;
+
+//explore community 489
+match (p1:Person {louvain: 489})-[v:VISITS]->(pl:Place), (p1)-[m:MEETS]->(p2:Person)
+return p1, p2, pl, v, m;
+
+//revisiting PAGERANK: using meettimeinseconds as weight
+
+:param limit => (10);
+:param config => ({
+nodeProjection: 'Person',
+relationshipProjection: {
+relType: {
+type: 'MEETS',
+orientation: 'NATURAL',
+properties: 'meettimeinseconds'
+}
+},
+dampingFactor: 0.85,
+maxIterations: 20,
+writeProperty: 'weightedpagerank',
+relationshipWeightProperty: 'meettimeinseconds'
+});
+CALL gds.pageRank.write($config);
