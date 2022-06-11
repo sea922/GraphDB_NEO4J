@@ -1,0 +1,163 @@
+{
+  "title": "Revisiting Covid19 Dashboard",
+  "version": "2.1",
+  "settings": {
+    "pagenumber": 0,
+    "editable": true,
+    "fullscreenEnabled": false,
+    "parameters": {}
+  },
+  "pages": [
+    {
+      "title": "Main Page",
+      "reports": [
+        {
+          "title": "Person with relationship",
+          "query": "MATCH (n)-[e]->(m) RETURN n,e,m LIMIT 20\n\n\n",
+          "width": 5,
+          "height": 3,
+          "x": 0,
+          "y": 0,
+          "type": "graph",
+          "selection": {
+            "Person": "name",
+            "Visit": "id",
+            "Place": "name"
+          },
+          "settings": {
+            "nodePositions": {}
+          }
+        },
+        {
+          "title": "Who has a sick person potentially infected",
+          "query": "match (p:Person {healthstatus:\"Sick\"})\nwith p\nlimit 1\nmatch path = (p)-->(v1:Visit)-->(pl:Place)<--(v2:Visit)<--(p2:Person {healthstatus:\"Healthy\"})\nreturn path;",
+          "width": 7,
+          "height": 3,
+          "x": 5,
+          "y": 0,
+          "type": "graph",
+          "selection": {
+            "Person": "name",
+            "Visit": "id",
+            "Place": "name"
+          },
+          "settings": {
+            "nodePositions": {},
+            "frozen": false
+          }
+        },
+        {
+          "title": "Higher risk of infection: Time overlap between visits",
+          "query": "match (p:Person {healthstatus:\"Sick\"})-[v1:VISITS]->(pl:Place)\nwith p,v1,pl\nlimit 10\nmatch path = (p)-[v1]->(pl)<-[v2:VISITS]-(p2:Person {healthstatus:\"Healthy\"})\nwith path, apoc.coll.max([v1.starttime.epochMillis, v2.starttime.epochMillis]) as maxStart,\napoc.coll.min([v1.endtime.epochMillis, v2.endtime.epochMillis]) as minEnd\nwhere maxStart <= minEnd\nreturn path;\n\n\n",
+          "width": 5,
+          "height": 3,
+          "x": 0,
+          "y": 3,
+          "type": "graph",
+          "selection": {
+            "Person": "name",
+            "Place": "name"
+          },
+          "settings": {
+            "nodePositions": {},
+            "frozen": false
+          }
+        },
+        {
+          "title": "Find sick person that has visited places since being infected",
+          "query": "\nmatch (pl:Place)<-[v2]-(p:Person {healthstatus:\"Sick\"})-[v1]->(pl:Place)\nwhere p.confirmedtime > v1.starttime\nor p.confirmedtime > v2.starttime\nreturn *;\n\n",
+          "width": 7,
+          "height": 3,
+          "x": 5,
+          "y": 3,
+          "type": "graph",
+          "selection": {
+            "Person": "name",
+            "Place": "name"
+          },
+          "settings": {
+            "nodePositions": {},
+            "frozen": false
+          }
+        },
+        {
+          "title": "Risk of healthy people increases with overlap time",
+          "query": "match (hp:Person {healthstatus:\"Healthy\"})-[v1:VISITS]->(pl:Place)<-[v2:VISITS]-(sp:Person {healthstatus:\"Sick\"})\nwith hp, apoc.coll.max([v1.starttime.epochMillis, v2.starttime.epochMillis]) as maxStart,\napoc.coll.min([v1.endtime.epochMillis, v2.endtime.epochMillis]) as minEnd\nwhere maxStart <= minEnd\nreturn hp.name, hp.healthstatus, sum(minEnd-maxStart) as overlaptime\norder by overlaptime desc;\n\n\n",
+          "width": 5,
+          "height": 2,
+          "x": 0,
+          "y": 6,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "nodePositions": {},
+            "frozen": false
+          }
+        },
+        {
+          "title": "Visual",
+          "query": "match (hp:Person {healthstatus:\"Healthy\"})-[v1:VISITS]->(pl:Place)<-[v2:VISITS]-(sp:Person {healthstatus:\"Sick\"})\nwith hp, apoc.coll.max([v1.starttime.epochMillis, v2.starttime.epochMillis]) as maxStart,\napoc.coll.min([v1.endtime.epochMillis, v2.endtime.epochMillis]) as minEnd\nwhere maxStart <= minEnd\nwith hp, sum(minEnd-maxStart) as overlaptime\norder by overlaptime desc\nlimit 10\nmatch (hp)-[v]-(pl:Place)\nreturn hp,v,pl;\n\n\n",
+          "width": 7,
+          "height": 2,
+          "x": 5,
+          "y": 6,
+          "type": "graph",
+          "selection": {
+            "Person": "name",
+            "Place": "name"
+          },
+          "settings": {
+            "nodePositions": {},
+            "frozen": false
+          }
+        },
+        {
+          "title": "Finding the hotspots",
+          "query": "match (p:Person {healthstatus:\"Sick\"})-[v:VISITS]->(pl:Place)\nwith distinct pl.name as placename, count(v) as nrofsickvisits, apoc.node.degree.in(pl,'VISITS') as totalnrofvisits\norder by nrofsickvisits desc\nlimit 10\nreturn placename, nrofsickvisits, totalnrofvisits, round(toFloat(nrofsickvisits)/toFloat(totalnrofvisits)*10000)/100 as percentageofsickvisits;\n\n\n",
+          "width": 5,
+          "height": 2,
+          "x": 0,
+          "y": 8,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "nodePositions": {},
+            "frozen": false
+          }
+        },
+        {
+          "title": "",
+          "query": "match (p:Person {healthstatus:\"Sick\"})-[v:VISITS]->(pl:Place)\nwith distinct pl.name as placename, count(v) as nrofsickvisits, pl\norder by nrofsickvisits desc\nlimit 10\nmatch (pl)<-[v]-(p:Person)\nreturn pl,p,v;\n\n\n",
+          "width": 7,
+          "height": 2,
+          "x": 5,
+          "y": 8,
+          "type": "graph",
+          "selection": {
+            "Place": "name",
+            "Person": "name"
+          },
+          "settings": {
+            "nodePositions": {},
+            "frozen": false
+          }
+        },
+        {
+          "title": "",
+          "query": "MATCH (n:Person {healthstatus: 'Sick'}) RETURN n.name LIMIT 100\n\n\n",
+          "width": 3,
+          "height": 2,
+          "x": 0,
+          "y": 10,
+          "type": "table",
+          "selection": {},
+          "settings": {
+            "nodePositions": {},
+            "frozen": false
+          }
+        }
+      ]
+    }
+  ],
+  "parameters": {}
+}
